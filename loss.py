@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def match_boxes(predicted_boxes, gt_boxes, iou_threshold=0.1):
+def match_boxes(predicted_boxes, gt_boxes, iou_threshold=0.0):
     """
     Match anchor boxes to ground truth boxes based on IoU criteria.
 
@@ -24,19 +24,20 @@ def match_boxes(predicted_boxes, gt_boxes, iou_threshold=0.1):
     if num_anchors == 0 or num_gt_boxes == 0:
         raise ValueError("No anchor boxes or ground truth boxes")
 
-    print(f"shape of anchor_boxes: {predicted_boxes.shape}")
-    print(f"shape of gt_boxes: {gt_boxes.shape}")
-    print(f"predicted_boxes: {predicted_boxes}")
-    print(f"gt_boxes: {gt_boxes}")
+    #print(f"shape of anchor_boxes: {predicted_boxes.shape}")
+    #print(f"shape of gt_boxes: {gt_boxes.shape}")
+    #print(f"predicted_boxes: {predicted_boxes}")
+    #print(f"gt_boxes: {gt_boxes}")
+    # Todo find candidate for predicted box or gt box? which way works better?
     iou_matrix = ops.box_iou(predicted_boxes, gt_boxes)
-    print("iou_matrix", iou_matrix)
+    #print("iou_matrix", iou_matrix)
 
     max_iou_values, matched_idxs = iou_matrix.max(dim=1)
     positive_mask = max_iou_values >= iou_threshold
 
-    print(f"shape of iou_matrix: {iou_matrix.shape}")
-    print(f"shape of matched_idxs: {matched_idxs.shape}")
-    print(f"shape of positive_mask: {positive_mask.shape}")
+    #print(f"shape of iou_matrix: {iou_matrix.shape}")
+    #print(f"shape of matched_idxs: {matched_idxs.shape}")
+    #print(f"shape of positive_mask: {positive_mask.shape}")
 
     return matched_idxs, positive_mask
 
@@ -51,51 +52,64 @@ class PushkinLoss(nn.Module):
         predicted_boxes, predicted_classes = predictions
         gt_boxes, gt_classes = ground_truth
 
-        print(f"shape of predicted_classes: {predicted_classes.shape}")
-        print(f"shape of predicted_boxes: {predicted_boxes.shape}")
+        #print(f"shape of predicted_classes: {predicted_classes.shape}")
+        #print(f"shape of predicted_boxes: {predicted_boxes.shape}")
 
-        batch_matched_idxs, batch_positive_masks = [], []
+        #batch_matched_idxs, batch_positive_masks = [], []
 
         batch_size = predicted_boxes.size(0)
-        print(f"batch_size: {batch_size}")
+        batch_losses = []
+        #print(f"batch_size: {batch_size}")
         for i in range(batch_size):
+            predicted_boxes_i = predicted_boxes[i]
+            gt_boxes_i = gt_boxes[i]
+            predicted_classes_i = predicted_classes[i]
+            gt_classes_i = gt_classes[i]
             matched_idxs, positive_mask = match_boxes(
-                predicted_boxes[i], gt_boxes[i]
+                predicted_boxes_i, gt_boxes_i
             )
-            batch_matched_idxs.append(matched_idxs)
-            batch_positive_masks.append(positive_mask)
-            print(f"positive mask: {positive_mask}")
-            print(f"matched_idxs: {matched_idxs}")
-            print("end iteration", i)
-        batch_matched_idxs = torch.stack(batch_matched_idxs)
-        batch_positive_masks = torch.stack(batch_positive_masks)
+            #print(f"positive mask: {positive_mask}")
+            #print(f"matched_idxs: {matched_idxs}")
+            
+            if (positive_mask == False).all():
+                continue
+            
 
-        print(f"shape of batch positive masks: {batch_positive_masks.shape}")
+            matched_predicted_boxes = predicted_boxes_i[positive_mask]
+            matched_predicted_classes = predicted_classes_i[positive_mask]
 
-        pos_pred_classes = predicted_classes[batch_positive_masks]
-        pos_label_classes = gt_classes[batch_positive_masks]
+            matched_gt_boxes = gt_boxes_i[matched_idxs]
+            matched_gt_boxes = matched_gt_boxes[positive_mask]
+            matched_gt_classes = gt_classes_i[matched_idxs]
+            matched_gt_classes = matched_gt_classes[positive_mask]
 
-        pos_pred_boxes = predicted_boxes[batch_positive_masks]
-        pos_label_boxes = gt_boxes[batch_positive_masks]
+            #print(f"shape of matched_predicted_boxes: {matched_predicted_boxes.shape}")
+            #print(f"shape of matched_predicted_classes: {matched_predicted_classes.shape}")
+            #print(f"shape of matched_gt_boxes: {matched_gt_boxes.shape}")
+            #print(f"shape of matched_gt_classes: {matched_gt_classes.shape}")
 
-        print(f"shape of pos_pred_classes: {pos_pred_classes.shape}")
-        print(f"shape of pos_label_classes: {pos_label_classes.shape}")
-        print(f"shape of pos_pred_boxes: {pos_pred_boxes.shape}")
-        print(f"shape of pos_label_boxes: {pos_label_boxes.shape}")
+            l = self.loss(matched_predicted_boxes, matched_predicted_classes, matched_gt_boxes, matched_gt_classes)
+            batch_losses.append(l)
 
-        return self.loss(
-            pos_pred_boxes, pos_pred_classes, pos_label_boxes, pos_label_classes
-        )
+            #print("end iteration", i)
 
-    def loss(self, loc_preds, cls_preds, loc_labels, cls_labels):
+        if len(batch_losses) == 0:
+            print("batch_losses is empty")
+            return torch.tensor(0.0, requires_grad=True)
+        return sum(batch_losses)
+    
+    def loss(self, matched_box_preds, matched_class_preds, box_gt, class_gt):
         # Localization loss (Smooth L1 Loss)
-        loc_loss = F.smooth_l1_loss(loc_preds, loc_labels)
+        #print("matched_box_preds", matched_box_preds)
+        #print("box_gt", box_gt)
+        loc_loss = F.smooth_l1_loss(matched_box_preds, box_gt)
 
         # Classification loss (Focal Loss)
-        cls_loss = self.focal_loss(cls_preds, cls_labels)
+        #cls_loss = self.focal_loss(matched_class_preds, class_gt)
 
         # Total loss
-        loss = loc_loss + cls_loss
+        loss = loc_loss * 10# + torch.tensor(0)
+        #print(loss)
         return loss
 
     def focal_loss(self, preds, labels):
