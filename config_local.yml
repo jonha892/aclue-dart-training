@@ -1,0 +1,7 @@
+path: /home/jonas/develop/aclue-dart-labelling/data_yolo
+train: train
+val: val
+
+names:
+    0: anchor
+    1: dart
