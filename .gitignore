@@ -1,3 +1,9 @@
 .ipynb_checkpoints/
+__pycache__/
 
 env/
+dartnet_data/
+runs/
+test/
+
+yolov8n.pt
